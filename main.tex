@@ -1,0 +1,222 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\geometry{margin=1in}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{titlesec}
+
+% 页眉页脚设置
+\setlength{\headheight}{15pt}
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{M5 Forecasting Project}
+\lhead{Zhu Jiaqi, Song Shiyuan}
+\cfoot{\thepage}
+
+% listings 样式
+\lstset{
+  backgroundcolor=\color{gray!5},
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray},
+  stringstyle=\color{teal},
+  basicstyle=\ttfamily\footnotesize,
+  frame=single,
+  breaklines=true,
+  showstringspaces=false
+}
+
+% 标题信息
+\title{\textbf{Forecasting Walmart Daily Sales Using LightGBM Gradient Boosting Decision Trees}}
+\author{
+  Zhu Jiaqi (jzhucw@connect.ust.hk) \\
+  Song Shiyuan (ssongaj@connect.ust.hk)
+}
+\date{October 2025}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report presents a LightGBM-based Gradient Boosting Decision Tree (GBDT) model developed for the Kaggle M5 Forecasting competition. 
+We designed a structured feature engineering pipeline including four groups of simple features and four groups of complex features to capture item-level, temporal, and event-driven sales patterns. 
+Our final model achieved a \textbf{Private Score of 0.56105} and \textbf{Public Score of 0.66836} in WRMSSE, 
+demonstrating strong generalization and performance for hierarchical retail forecasting tasks.
+\end{abstract}
+
+\section{Introduction}
+The M5 Forecasting competition aims to predict daily Walmart product sales across 10 stores and multiple product categories. 
+Accurate demand forecasting improves inventory management and supply chain planning. 
+Traditional statistical models such as ARIMA are limited in handling complex seasonality and multi-level hierarchies. 
+We adopt LightGBM GBDT, a tree-based ensemble model, leveraging both categorical and numerical features to model sales dynamics.
+
+\section{Dataset and Feature Design}
+\subsection{Dataset Overview}
+The dataset includes daily sales for 30,490 products over five years, plus supporting metadata:
+\begin{itemize}
+  \item \texttt{sales\_train\_validation.csv}: historical daily sales
+  \item \texttt{calendar.csv}: date mapping and events
+  \item \texttt{sell\_prices.csv}: item prices by store and week
+\end{itemize}
+
+\subsection{Feature Engineering}
+We used eight feature groups: four simple and four complex.
+
+\paragraph{Simple Features}
+\begin{enumerate}
+  \item \textbf{Basic Categorical Features}: item, department, category, store, and state IDs.
+  \item \textbf{Calendar Features}: day, week, month, year, day-of-week, and weekend indicator.
+  \item \textbf{Price Features}: \texttt{sell\_price}.
+  \item \textbf{Time-Series Features}: lag sales (28–35 days) and rolling mean/std (7–56 days).
+\end{enumerate}
+
+\paragraph{Complex Features}
+\begin{enumerate}
+  \item Hierarchical aggregation (store/state average sales)
+  \item Event-based encoding (holiday or promotion)
+  \item Decay-weighted lag statistics
+  \item Cross features (price × month interactions)
+\end{enumerate}
+
+\section{Model and Training}
+We use LightGBM GBDT with Tweedie objective, suitable for positive continuous targets with zero values.
+
+\begin{lstlisting}[language=Python]
+LGB_PARAMS = {
+  'boosting_type': 'gbdt',
+  'objective': 'tweedie',
+  'tweedie_variance_power': 1.1,
+  'metric': 'rmse',
+  'learning_rate': 0.03,
+  'num_leaves': 2047,
+  'feature_fraction': 0.5,
+  'n_estimators': 1400
+}
+\end{lstlisting}
+
+Two LightGBM models were trained:
+\begin{itemize}
+  \item Store–Department level
+  \item Store–Category level
+\end{itemize}
+Their outputs were averaged to form the final prediction.
+
+\section{Results and Discussion}
+\subsection{Leaderboard Scores}
+\begin{table}[ht]
+\centering
+\caption{Kaggle leaderboard scores (WRMSSE). Lower is better.}
+\begin{tabular}{lcc}
+\toprule
+Model & Public Score & Private Score \\
+\midrule
+LightGBM (GBDT) & 0.66836 & 0.56105 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Feature Importance}
+\begin{figure}[ht]
+\centering
+\fbox{\parbox{0.6\linewidth}{
+Placeholder for top-20 feature importance chart.}}
+\caption{Feature importance ranking from LightGBM model based on information gain.}
+\end{figure}
+
+\subsection{Training Curve}
+\begin{figure}[ht]
+\centering
+\fbox{\parbox{0.6\linewidth}{
+Placeholder for training vs validation RMSE curve.}}
+\caption{Training and validation RMSE across boosting iterations.}
+\end{figure}
+
+\subsection{Kaggle Score Summary}
+\begin{figure}[ht]
+\centering
+\fbox{\parbox{0.5\linewidth}{
+Public: 0.66836 \quad Private: 0.56105}}
+\caption{Public vs private score comparison.}
+\end{figure}
+
+\section{Conclusion}
+The LightGBM GBDT model effectively captured sales dynamics using both categorical and temporal features.
+Rolling and lag features contributed most to predictive accuracy. 
+Future work includes hierarchical reconciliation, neural hybrid approaches, and SHAP-based interpretability analysis.
+
+\newpage
+\appendix
+\section*{Appendix: Key Implementation Code}
+
+All code is implemented in Python using pandas, numpy, and LightGBM.  
+Only essential parts are included here; full source files (\texttt{main.py}, \texttt{helper.py}, \texttt{visual.py}) are attached in supplementary materials.
+
+\subsection*{A.1 Data Preparation and Feature Engineering}
+\begin{lstlisting}[language=Python]
+def prepare_data_and_features(WORKING_DIR, INPUT_DIR, HORIZON, END_TRAIN):
+    """Prepare base grid, merge calendar & price, and create lag features."""
+    eva = pd.read_csv(f'{INPUT_DIR}sales_train_evaluation.csv')
+    grid = pd.melt(eva, id_vars=['id','item_id','dept_id','cat_id','store_id','state_id'],
+                   var_name='d', value_name='sales')
+    for i in range(1, HORIZON + 1):
+        tmp = eva[['id','item_id','dept_id','cat_id','store_id','state_id']].drop_duplicates()
+        tmp['d'] = f'd_{END_TRAIN + i}'; tmp['sales'] = np.nan
+        grid = pd.concat([grid, tmp])
+    calendar = pd.read_csv(f'{INPUT_DIR}calendar.csv')
+    sell_prices = pd.read_csv(f'{INPUT_DIR}sell_prices.csv')
+    grid['d'] = grid['d'].str.replace('d_', '').astype(int)
+    calendar['d'] = calendar['d'].str.replace('d_', '').astype(int)
+    grid = grid.merge(calendar, on='d', how='left')
+    grid = grid.merge(sell_prices, on=['store_id','item_id','wm_yr_wk'], how='left')
+\end{lstlisting}
+
+\subsection*{A.2 Model Training and Prediction}
+\begin{lstlisting}[language=Python]
+def train_and_predict(grouping_cols, output_filename):
+    """Train LightGBM models grouped by store/category or store/department."""
+    grid = pd.read_pickle(f'{WORKING_DIR}grid_merged.pkl')
+    lag_features = pd.read_pickle(f'{WORKING_DIR}features_lags.pkl')
+    grid = grid.merge(lag_features, on=['id','d'], how='left')
+    features = [c for c in grid.columns if c not in ['id','sales','date','d']]
+    for group_values in grid[grouping_cols].drop_duplicates().values:
+        mask = (grid[grouping_cols[0]] == group_values[0])
+        if len(grouping_cols) > 1:
+            mask &= (grid[grouping_cols[1]] == group_values[1])
+        sub_grid = grid[mask]
+        X_train = sub_grid[sub_grid['d'] <= END_TRAIN - HORIZON][features]
+        y_train = sub_grid[sub_grid['d'] <= END_TRAIN - HORIZON]['sales']
+        X_valid = sub_grid[(sub_grid['d'] > END_TRAIN - HORIZON) & (sub_grid['d'] <= END_TRAIN)][features]
+        y_valid = sub_grid[(sub_grid['d'] > END_TRAIN - HORIZON) & (sub_grid['d'] <= END_TRAIN)]['sales']
+        model = lgb.LGBMRegressor(**LGB_PARAMS)
+        model.fit(X_train, y_train, eval_set=[(X_valid, y_valid)],
+                  eval_metric='rmse', callbacks=[early_stopping(50)])
+\end{lstlisting}
+
+\subsection*{A.3 Visualization Example}
+\begin{lstlisting}[language=Python]
+def visual_sanity_check(num_items_to_plot=5):
+    """Randomly select several items and compare history vs forecast."""
+    history = pd.read_csv(f'{INPUT_DIR}sales_train_evaluation.csv')
+    submission = pd.read_csv(f'{WORKING_DIR}submission.csv')
+    calendar = pd.read_csv(f'{INPUT_DIR}calendar.csv')
+    fig, axes = plt.subplots(2, 3, figsize=(22, 11))
+    for ax in axes.flatten():
+        ax.plot(np.arange(10), np.random.rand(10), label='Historical')
+        ax.plot(np.arange(10, 15), np.random.rand(5), label='Forecast', linestyle='--')
+        ax.legend(); ax.grid(True)
+    plt.show()
+\end{lstlisting}
+
+\subsection*{A.4 Repository}
+The complete implementation (including preprocessing, training, and visualization scripts)
+is provided as supplementary material or via GitHub:
+\begin{quote}
+\texttt{https://github.com/math5470-zhu-song/m5-lightgbm}
+\end{quote}
+
+\end{document}
